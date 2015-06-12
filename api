@@ -1,0 +1,44 @@
+#!/usr/bin/env ruby
+
+require 'sinatra'
+require 'json'
+
+require_relative './lib/binomium'
+require_relative './lib/jaccard'
+require_relative './lib/minhash'
+require_relative './lib/purchase_history'
+require_relative './lib/recommender'
+
+unless ARGV[0]
+  puts "Usage: api <purchases>"
+  exit 1
+end
+
+purchases = File.readlines(ARGV[0]).to_a.map do |line|
+  line.match(/^[0-9]/) ? line.split(';').map(&:to_i) : nil
+end.compact
+
+history = PurchaseHistory.new(purchases)
+binomia = 10.times.map { Binomium.new(1 + rand(10), 1 + rand(10)) }
+minhash = MinHash.new(history.products, binomia)
+
+signatures = history.users.reduce({}) do |col, (u, s)|
+  col.merge!({ u => minhash.hash(s) })
+end
+
+recommender = Recommender.new(Jaccard)
+
+get '/api/v0/recommendations.json' do
+  content_type :json
+
+  uid = params[:uid].to_i
+  prods = recommender.pick(uid, signatures, history.users)
+
+  unless prods.empty?
+    status 200
+    { product: prods.to_a.shuffle.first }.to_json
+  else
+    status 404
+    "{}"
+  end
+end
